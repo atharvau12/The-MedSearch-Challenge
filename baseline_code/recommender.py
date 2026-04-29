@@ -85,4 +85,3 @@ def recommend_alternatives(query, top_k=5):
     return results.head(top_k)[
         ["brand_name", "primary_ingredient", "primary_strength", "dosage_form"]
     ]
-# Manual test of the leaderboard automation
