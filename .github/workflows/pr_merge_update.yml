@@ -3,10 +3,10 @@ name: Merge PR Leaderboard Update
 on:
   pull_request:
     types: [closed]
-  workflow_dispatch: # THE EMERGENCY BUTTON
+  workflow_dispatch: # THE EMERGENCY BUTTON: Run manually from Actions tab
 
 permissions:
-  contents: write # CRITICAL: Allows the bot to update your leaderboard and folders
+  contents: write # Allows the bot to update leaderboard.md and submissions folder
 
 jobs:
   update_after_merge:
@@ -29,7 +29,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r baseline_code/requirements.txt
+          if [ -f baseline_code/requirements.txt ]; then pip install -r baseline_code/requirements.txt; fi
+          # Add any other libraries your evaluator needs here
 
       - name: Run Hidden Evaluation
         run: |
@@ -39,23 +40,34 @@ jobs:
       - name: Read Score
         id: score_step
         run: |
+          # Extract score from the JSON result
           SCORE=$(python -c "import json; print(json.load(open('outputs/evaluation_result.json'))['final_score'])")
           echo "score=$SCORE" >> $GITHUB_OUTPUT
 
-      - name: Update Leaderboard Files
+      - name: Commit Leaderboard and Archive Submission
         run: |
-          # Use 'Manual_Run' as username if triggered by button, otherwise use PR username
-          USER_NAME="${{ github.event.pull_request.user.login }}"
-          PR_NUM="${{ github.event.pull_request.number }}"
-          if [ -z "$USER_NAME" ]; then USER_NAME="Admin_Manual"; PR_NUM="0"; fi
-          
-          python -c "from leaderboard.update_leaderboard import update_leaderboard; update_leaderboard('$USER_NAME', '$PR_NUM', ${{ steps.score_step.outputs.score }})"
+          # Set up Git Identity
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Bot"
 
-      - name: Save Participant Submission
-        run: |
-          USER_NAME="${{ github.event.pull_request.user.login }}"
-          PR_NUM="${{ github.event.pull_request.number }}"
-          if [ -z "$USER_NAME" ]; then USER_NAME="Admin_Manual"; PR_NUM="0"; fi
+          # Determine Username and PR info
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            USER_NAME="Admin_Manual_Update"
+            PR_NUM="N/A"
+          else
+            USER_NAME="${{ github.event.pull_request.user.login }}"
+            PR_NUM="${{ github.event.pull_request.number }}"
+          fi
           
-          mkdir -p participant_submissions/${USER_NAME}_PR${PR_NUM}
-          cp baseline_code/recommender.py participant_submissions/${USER
+          # 1. Update the leaderboard markdown/json via your python script
+          python -c "from leaderboard.update_leaderboard import update_leaderboard; update_leaderboard('$USER_NAME', '$PR_NUM', ${{ steps.score_step.outputs.score }})"
+          
+          # 2. Archive the code into participant_submissions
+          SUB_FOLDER="participant_submissions/${USER_NAME}_Submission"
+          mkdir -p "$SUB_FOLDER"
+          cp baseline_code/recommender.py "$SUB_FOLDER/recommender_at_$(date +%Y%m%d_%H%M%S).py"
+          
+          # 3. Push changes back to main
+          git add leaderboard/ participant_submissions/
+          git commit -m "Leaderboard update: $USER_NAME (Score: ${{ steps.score_step.outputs.score }})" || echo "No changes to commit"
+          git push
