@@ -3,18 +3,21 @@ name: Merge PR Leaderboard Update
 on:
   pull_request:
     types: [closed]
+  workflow_dispatch: # THE EMERGENCY BUTTON
+
+permissions:
+  contents: write # CRITICAL: Allows the bot to update your leaderboard and folders
 
 jobs:
   update_after_merge:
-    # Only run if the PR was actually merged, not just closed
-    if: github.event.pull_request.merged == true
+    # Runs if merged OR if you click the manual button
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Main Repo
         uses: actions/checkout@v4
         with:
-          # Fetches full history so the bot can push changes back
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -30,37 +33,29 @@ jobs:
 
       - name: Run Hidden Evaluation
         run: |
-          # Ensure the outputs directory exists before running the script
           mkdir -p outputs
           python hidden_evaluation/evaluator.py
 
       - name: Read Score
         id: score_step
         run: |
-          # Extract the final_score from the generated JSON
           SCORE=$(python -c "import json; print(json.load(open('outputs/evaluation_result.json'))['final_score'])")
           echo "score=$SCORE" >> $GITHUB_OUTPUT
 
       - name: Update Leaderboard Files
         run: |
-          # Calls the script that handles both .json and .md files
-          python -c "from leaderboard.update_leaderboard import update_leaderboard; update_leaderboard('${{ github.event.pull_request.user.login }}', '${{ github.event.pull_request.number }}', ${{ steps.score_step.outputs.score }})"
+          # Use 'Manual_Run' as username if triggered by button, otherwise use PR username
+          USER_NAME="${{ github.event.pull_request.user.login }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
+          if [ -z "$USER_NAME" ]; then USER_NAME="Admin_Manual"; PR_NUM="0"; fi
+          
+          python -c "from leaderboard.update_leaderboard import update_leaderboard; update_leaderboard('$USER_NAME', '$PR_NUM', ${{ steps.score_step.outputs.score }})"
 
       - name: Save Participant Submission
         run: |
-          # Create a specific folder for the contributor's code
-          mkdir -p participant_submissions/${{ github.event.pull_request.user.login }}_PR${{ github.event.pull_request.number }}
-          cp baseline_code/recommender.py participant_submissions/${{ github.event.pull_request.user.login }}_PR${{ github.event.pull_request.number }}/
-
-      - name: Commit Updated Files
-        run: |
-          # Set identity so GitHub knows who is committing
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          USER_NAME="${{ github.event.pull_request.user.login }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
+          if [ -z "$USER_NAME" ]; then USER_NAME="Admin_Manual"; PR_NUM="0"; fi
           
-          # Stage the leaderboard data and the new submission folder
-          git add leaderboard/leaderboard.json leaderboard/leaderboard.md participant_submissions/
-          
-          # Commit and push. If no changes (rare), the '|| echo' prevents the action from failing.
-          git commit -m "🏆 Achievement: ${{ github.event.pull_request.user.login }} joined the leaderboard!" || echo "No changes to commit"
-          git push origin main
+          mkdir -p participant_submissions/${USER_NAME}_PR${PR_NUM}
+          cp baseline_code/recommender.py participant_submissions/${USER
